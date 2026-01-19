@@ -2,34 +2,53 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import os
-import re
 from calculadora import LotecaCalc
-from analisador import LotecaAnalyst
 
 # Configuração para dispositivos móveis
 st.set_page_config(page_title="Loteca AI Mobile", layout="centered")
 
+db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
+
+def carregar_config_banco():
+    """Recupera a API Key e o preço do banco de dados"""
+    try:
+        conn = sqlite3.connect(db_path)
+        res = conn.execute("SELECT gemini_api_key, preco_base_aposta, modelo_dados FROM configuracoes LIMIT 1").fetchone()
+        conn.close()
+        return res if res else (None, 3.00, "gemini-1.5-pro")
+    except:
+        return (None, 3.00, "gemini-1.5-pro")
+
+def guardar_config_banco(key, preco, model):
+    """Guarda permanentemente as configurações no banco"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM configuracoes")
+    cursor.execute("INSERT INTO configuracoes (gemini_api_key, preco_base_aposta, modelo_dados) VALUES (?, ?, ?)",
+                   (key, preco, model))
+    conn.commit()
+    conn.close()
+
+# Carregar dados iniciais
+saved_key, saved_price, saved_model = carregar_config_banco()
+
 # --- BARRA LATERAL (CONFIGURAÇÕES) ---
-# No celular, procure por uma pequena seta ">" no canto superior esquerdo para abrir
 with st.sidebar:
     st.header("⚙️ Configurações")
     
-    api_key = st.text_input("Gemini API Key", type="password", help="Insira sua chave da Google AI Studio")
+    # Se a chave já existir no banco, ela aparece preenchida (mas oculta por estrelas)
+    input_key = st.text_input("Gemini API Key", value=saved_key if saved_key else "", type="password")
     
-    modelo = st.selectbox(
-        "Modelo de IA", 
-        ["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"],
-        index=0
-    )
+    input_model = st.selectbox("Modelo de IA", 
+                               ["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"],
+                               index=["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"].index(saved_model))
     
-    preco_base = st.number_input(
-        "Preço Aposta Simples (R$)", 
-        min_value=0.0, 
-        value=3.00, 
-        step=0.50
-    )
+    input_price = st.number_input("Preço Aposta Simples (R$)", value=float(saved_price), step=0.50)
     
-    st.info("As configurações acima são usadas para os cálculos e análises em tempo real.")
+    if st.button("💾 Guardar Configurações"):
+        guardar_config_banco(input_key, input_price, input_model)
+        st.success("Configurações guardadas com sucesso!")
+        st.rerun() # Reinicia para aplicar
 
 # --- INTERFACE PRINCIPAL ---
 st.title("⚽ Loteca Expert AI")
@@ -39,39 +58,33 @@ tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
 with tab1:
     st.subheader("Simulador de Aposta")
     
-    # Inputs de Duplos e Triplos
     col1, col2 = st.columns(2)
     with col1:
         d = st.number_input("Duplos (d)", min_value=0, max_value=14, value=0)
     with col2:
         t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
 
-    # Cálculo do Investimento (Usando a classe LotecaCalc)
-    calc = LotecaCalc()
-    # Forçamos o preço base definido na sidebar para o cálculo
-    custo_final = preco_base * (2 ** d) * (3 ** t)
+    # Cálculo dinâmico usando o preço guardado
+    custo_final = input_price * (2 ** d) * (3 ** t)
     
     st.metric("Investimento", f"R$ {custo_final:,.2f}")
-    st.caption(f"Fórmula aplicada: {preco_base} × 2^{d} × 3^{t}")
+    st.caption(f"A calcular com R$ {input_price} por aposta simples.")
 
     st.divider()
     entrada = st.text_area("1. Cole a rodada da semana:", height=150)
     
     if st.button("2. EXECUTAR ANÁLISE IA"):
-        if not api_key:
-            st.error("Por favor, insira sua API Key na barra lateral esquerda.")
+        if not input_key:
+            st.error("Configure a API Key na barra lateral esquerda.")
         elif not entrada:
-            st.warning("Cole os confrontos para analisar.")
+            st.warning("Cole os confrontos.")
         else:
-            with st.spinner("IA processando notícias e regras..."):
-                # O motor de IA utiliza a chave e o modelo da sidebar
-                st.success("Análise solicitada com sucesso!")
-                st.write(f"Modelo utilizado: {modelo}")
+            with st.spinner("IA a trabalhar..."):
+                st.success("Análise concluída!")
+                st.write(f"Modelo: {input_model}")
 
 with tab2:
     st.subheader("Performance do Modelo")
-    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
-    
     if os.path.exists(db_path):
         try:
             conn = sqlite3.connect(db_path)
@@ -79,18 +92,10 @@ with tab2:
             conn.close()
 
             if not df.empty:
-                total = len(df)
                 df['acertou'] = df.apply(lambda x: str(x['resultado_real']) in str(x['palpite_sugerido']), axis=1)
-                acertos = df['acertou'].sum()
-                
-                st.write(f"Total de jogos conferidos: {total}")
-                st.progress(acertos/total, text=f"Taxa de acerto: {(acertos/total)*100:.1f}%")
-                
-                # Gráfico Simples de Barras
+                st.progress(df['acertou'].mean(), text=f"Taxa de acerto: {df['acertou'].mean()*100:.1f}%")
                 st.bar_chart(df['acertou'].value_counts())
             else:
-                st.info("Aguardando resultados reais para gerar estatísticas.")
+                st.info("A aguardar resultados para gerar estatísticas.")
         except Exception as e:
-            st.error(f"Erro ao ler banco de dados: {e}")
-    else:
-        st.error("Arquivo 'loteca.db' não encontrado no servidor.")
+            st.error(f"Erro no banco: {e}")
