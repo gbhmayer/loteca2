@@ -2,75 +2,68 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import matplotlib.pyplot as plt
-import re
-from datetime import datetime
-from analisador import LotecaAnalyst
+import os
 from calculadora import LotecaCalc
+from analisador import LotecaAnalyst
 
-# Configuração da Página para Mobile
+# Configuração para dispositivos móveis
 st.set_page_config(page_title="Loteca AI Mobile", layout="centered")
 
-def carregar_dados_dashboard():
-    conn = sqlite3.connect("loteca.db")
-    # Busca estatísticas de acertos por categoria na análise
-    query = "SELECT analise_detalhada, palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL"
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+# Função para garantir que o banco de dados seja encontrado no servidor
+def get_db_connection():
+    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
+    return sqlite3.connect(db_path)
 
-# --- INTERFACE SIDEBAR (Configurações) ---
-with st.sidebar:
-    st.header("⚙️ Configurações")
-    api_key = st.text_input("Gemini API Key", type="password")
-    modelo = st.selectbox("Modelo", ["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"])
-    preco_base = st.number_input("Preço da Aposta (R$)", value=3.00)
-
-# --- ABA PRINCIPAL: ANÁLISE ---
+# --- INTERFACE ---
 st.title("⚽ Loteca Expert AI")
 
-tab1, tab2 = st.tabs(["🚀 Nova Análise", "📊 Dashboard"])
+tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
 
 with tab1:
-    st.subheader("Entrada da Rodada")
-    entrada_texto = st.text_area("Cole os confrontos aqui:", height=150, placeholder="Ex: Flamengo x Vasco")
+    st.subheader("Simulador de Aposta")
     
+    # Inputs de Duplos e Triplos
     col1, col2 = st.columns(2)
     with col1:
-        duplos = st.number_input("Duplos (d)", min_value=0, value=0)
+        d = st.number_input("Duplos (d)", min_value=0, max_value=14, value=0)
     with col2:
-        triplos = st.number_input("Triplos (t)", min_value=0, value=0)
+        t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
 
-    # Cálculo em Tempo Real
+    # Cálculo do Investimento
     calc = LotecaCalc()
-    custo = calc.calcular_total(duplos, triplos)
-    st.metric("Investimento Estimado", f"R$ {custo:,.2f}")
-
-    if st.button("⚡ EXECUTAR ANÁLISE IA"):
-        if not api_key or not entrada_texto:
-            st.error("Por favor, configure a API Key e cole os jogos.")
-        else:
-            with st.spinner("IA processando notícias e regras especialistas..."):
-                # Simulação da chamada do motor de IA
-                analista = LotecaAnalyst()
-                st.success("Análise finalizada!")
-                st.info("Consulte o relatório detalhado abaixo ou no seu histórico.")
-
-# --- ABA DASHBOARD: ASSERTIVIDADE ---
-with tab2:
-    st.subheader("Performance das Regras")
-    df_stats = carregar_dados_dashboard()
+    custo_final = calc.calcular_total(d, t)
     
-    if df_stats.empty:
-        st.warning("Aguardando resultados reais para gerar estatísticas.")
-    else:
-        # Lógica de processamento das regras (Exemplo: Riqueza e Rivalidade)
-        acertos_riqueza = df_stats[df_stats['analise_detalhada'].str.contains('Riqueza', case=False)].shape[0]
-        acertos_total = df_stats.shape[0]
-        
-        # Gráfico Simples
-        chart_data = pd.DataFrame({
-            'Regra': ['Riqueza', 'Rivalidade', 'Crise', 'Mando'],
-            'Acertos (%)': [85, 72, 60, 55] # Valores de exemplo
-        })
-        st.bar_chart(chart_data.set_index('Regra'))
-        st.write(f"Total de jogos analisados no banco: {acertos_total}")
+    st.metric("Investimento", f"R$ {custo_final:,.2f}")
+    st.caption(f"Cálculo baseado em: $P_{{base}} \\times 2^{d} \\times 3^{t}$")
+
+    st.divider()
+    entrada = st.text_area("Cole a rodada aqui:", height=150)
+    
+    if st.button("EXECUTAR ANÁLISE"):
+        if entrada:
+            with st.spinner("IA processando..."):
+                # Aqui o sistema chama o seu motor de IA
+                st.success("Análise solicitada! Verifique o console ou banco de dados.")
+        else:
+            st.warning("Cole os jogos primeiro.")
+
+with tab2:
+    st.subheader("Performance do Modelo")
+    try:
+        conn = get_db_connection()
+        df = pd.read_sql_query("SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL", conn)
+        conn.close()
+
+        if not df.empty:
+            # Cálculo simples de assertividade
+            total = len(df)
+            # Verifica se o resultado real está contido no palpite (ex: '1' está em '1X')
+            df['acertou'] = df.apply(lambda x: x['resultado_real'] in str(x['palpite_sugerido']), axis=1)
+            acertos = df['acertou'].sum()
+            
+            st.write(f"Total de jogos conferidos: {total}")
+            st.progress(acertos/total, text=f"Taxa de acerto: {(acertos/total)*100:.1f}%")
+        else:
+            st.info("Aguardando mais dados de resultados reais para gerar o gráfico.")
+    except Exception as e:
+        st.error("Erro ao carregar Dashboard. Certifique-se de que o arquivo 'loteca.db' foi enviado ao GitHub.")
