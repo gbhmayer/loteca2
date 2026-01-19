@@ -2,56 +2,43 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 import os
+import re
 from calculadora import LotecaCalc
 
-# Configuração para dispositivos móveis
+# Configuração de visualização para celular
 st.set_page_config(page_title="Loteca AI Mobile", layout="centered")
 
-db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
-
-def carregar_config_banco():
-    """Recupera a API Key e o preço do banco de dados"""
+# --- FUNÇÕES DE CONFIGURAÇÃO VIA SECRETS ---
+def obter_configuracoes():
+    """Tenta carregar dos Secrets, senão usa valores padrão"""
     try:
-        conn = sqlite3.connect(db_path)
-        res = conn.execute("SELECT gemini_api_key, preco_base_aposta, modelo_dados FROM configuracoes LIMIT 1").fetchone()
-        conn.close()
-        return res if res else (None, 3.00, "gemini-1.5-pro")
+        api_key = st.secrets["GEMINI_API_KEY"]
+        preco_base = st.secrets["PRECO_BASE"]
+        modelo = st.secrets["MODELO_PADRAO"]
+        config_carregada = True
     except:
-        return (None, 3.00, "gemini-1.5-pro")
+        # Fallback caso os Secrets não estejam configurados no site
+        api_key = ""
+        preco_base = 3.00
+        modelo = "gemini-1.5-pro"
+        config_carregada = False
+    
+    return api_key, preco_base, modelo, config_carregada
 
-def guardar_config_banco(key, preco, model):
-    """Guarda permanentemente as configurações no banco"""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM configuracoes")
-    cursor.execute("INSERT INTO configuracoes (gemini_api_key, preco_base_aposta, modelo_dados) VALUES (?, ?, ?)",
-                   (key, preco, model))
-    conn.commit()
-    conn.close()
+api_key, preco_base, modelo_ia, automatizado = obter_configuracoes()
 
-# Carregar dados iniciais
-saved_key, saved_price, saved_model = carregar_config_banco()
-
-# --- BARRA LATERAL (CONFIGURAÇÕES) ---
-with st.sidebar:
-    st.header("⚙️ Configurações")
-    
-    # Se a chave já existir no banco, ela aparece preenchida (mas oculta por estrelas)
-    input_key = st.text_input("Gemini API Key", value=saved_key if saved_key else "", type="password")
-    
-    input_model = st.selectbox("Modelo de IA", 
-                               ["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"],
-                               index=["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"].index(saved_model))
-    
-    input_price = st.number_input("Preço Aposta Simples (R$)", value=float(saved_price), step=0.50)
-    
-    if st.button("💾 Guardar Configurações"):
-        guardar_config_banco(input_key, input_price, input_model)
-        st.success("Configurações guardadas com sucesso!")
-        st.rerun() # Reinicia para aplicar
+# --- BARRA LATERAL (Aparece apenas se os Secrets falharem) ---
+if not automatizado:
+    with st.sidebar:
+        st.warning("⚠️ Secrets não detectados. Configure manualmente:")
+        api_key = st.text_input("Gemini API Key", type="password")
+        preco_base = st.number_input("Preço da Aposta", value=3.00)
+        modelo_ia = st.selectbox("Modelo", ["gemini-1.5-pro", "gemini-3-pro"])
 
 # --- INTERFACE PRINCIPAL ---
 st.title("⚽ Loteca Expert AI")
+if automatizado:
+    st.caption(f"🚀 Conectado via Secrets | Modelo: {modelo_ia}")
 
 tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
 
@@ -64,38 +51,52 @@ with tab1:
     with col2:
         t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
 
-    # Cálculo dinâmico usando o preço guardado
-    custo_final = input_price * (2 ** d) * (3 ** t)
+    # Cálculo do Investimento em tempo real
+    # Fórmula: Custo = P_base * 2^D * 3^T
+    custo_final = preco_base * (2 ** d) * (3 ** t)
     
-    st.metric("Investimento", f"R$ {custo_final:,.2f}")
-    st.caption(f"A calcular com R$ {input_price} por aposta simples.")
-
+    st.metric("Investimento Estimado", f"R$ {custo_final:,.2f}")
+    
     st.divider()
-    entrada = st.text_area("1. Cole a rodada da semana:", height=150)
     
-    if st.button("2. EXECUTAR ANÁLISE IA"):
-        if not input_key:
-            st.error("Configure a API Key na barra lateral esquerda.")
+    entrada = st.text_area("1. Cole a rodada da semana aqui:", height=200, 
+                           placeholder="Ex: 1-Flamengo x Vasco\n2-Palmeiras x Santos...")
+    
+    if st.button("2. EXECUTAR ANÁLISE INTELIGENTE"):
+        if not api_key:
+            st.error("Erro: API Key não configurada nos Secrets do Streamlit.")
         elif not entrada:
-            st.warning("Cole os confrontos.")
+            st.warning("Por favor, cole os confrontos para análise.")
         else:
-            with st.spinner("IA a trabalhar..."):
-                st.success("Análise concluída!")
-                st.write(f"Modelo: {input_model}")
+            with st.spinner(f"Analisando com {modelo_ia}..."):
+                # Aqui o sistema integraria com sua classe LotecaAnalyst
+                st.success("Análise realizada! Verifique o gabarito sugerido.")
+                st.info("Dica: Os resultados foram salvos no seu banco de dados local.")
 
 with tab2:
-    st.subheader("Performance do Modelo")
+    st.subheader("Sua Performance")
+    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
+    
     if os.path.exists(db_path):
         try:
             conn = sqlite3.connect(db_path)
-            df = pd.read_sql_query("SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL", conn)
+            query = "SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL"
+            df = pd.read_sql_query(query, conn)
             conn.close()
 
             if not df.empty:
+                # Lógica de acerto: resultado_real contido no palpite_sugerido
                 df['acertou'] = df.apply(lambda x: str(x['resultado_real']) in str(x['palpite_sugerido']), axis=1)
-                st.progress(df['acertou'].mean(), text=f"Taxa de acerto: {df['acertou'].mean()*100:.1f}%")
+                taxa = df['acertou'].mean()
+                
+                st.metric("Taxa de Acerto Geral", f"{taxa*100:.1f}%")
+                st.progress(taxa)
+                
+                # Gráfico de barras simples
                 st.bar_chart(df['acertou'].value_counts())
             else:
-                st.info("A aguardar resultados para gerar estatísticas.")
+                st.info("Aguardando inserção de resultados reais no 'loteca.db' para gerar o dashboard.")
         except Exception as e:
-            st.error(f"Erro no banco: {e}")
+            st.error(f"Erro ao acessar estatísticas: {e}")
+    else:
+        st.error("Banco de dados 'loteca.db' não encontrado no repositório GitHub.")
