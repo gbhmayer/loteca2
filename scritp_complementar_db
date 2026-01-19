@@ -1,0 +1,11 @@
+import sqlite3
+
+conn = sqlite3.connect("loteca.db")
+cursor = conn.cursor()
+# Adiciona a coluna para armazenar o resultado oficial (1, X ou 2)
+try:
+    cursor.execute("ALTER TABLE jogos ADD COLUMN resultado_real TEXT")
+    conn.commit()
+except:
+    pass # Coluna já existe
+conn.close()
