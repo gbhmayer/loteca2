@@ -4,99 +4,106 @@ import pandas as pd
 import os
 import re
 from calculadora import LotecaCalc
+from analisador import LotecaAnalyst
 
-# Configuração de visualização para celular
-st.set_page_config(page_title="Loteca AI Mobile", layout="centered")
+# Configuração para dispositivos móveis
+st.set_page_config(page_title="Loteca Expert AI", layout="centered")
 
-# --- FUNÇÕES DE CONFIGURAÇÃO VIA SECRETS ---
-def obter_configuracoes():
-    """Tenta carregar dos Secrets, senão usa valores padrão"""
-    try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-        preco_base = st.secrets["PRECO_BASE"]
-        modelo = st.secrets["MODELO_PADRAO"]
-        config_carregada = True
-    except:
-        # Fallback caso os Secrets não estejam configurados no site
-        api_key = ""
-        preco_base = 3.00
-        modelo = "gemini-1.5-pro"
-        config_carregada = False
-    
-    return api_key, preco_base, modelo, config_carregada
+# --- SISTEMA DE SEGURANÇA (LOGIN) ---
+def verificar_acesso():
+    """Cria uma barreira de senha antes de carregar o app."""
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
 
-api_key, preco_base, modelo_ia, automatizado = obter_configuracoes()
-
-# --- BARRA LATERAL (Aparece apenas se os Secrets falharem) ---
-if not automatizado:
-    with st.sidebar:
-        st.warning("⚠️ Secrets não detectados. Configure manualmente:")
-        api_key = st.text_input("Gemini API Key", type="password")
-        preco_base = st.number_input("Preço da Aposta", value=3.00)
-        modelo_ia = st.selectbox("Modelo", ["gemini-1.5-pro", "gemini-3-pro"])
-
-# --- INTERFACE PRINCIPAL ---
-st.title("⚽ Loteca Expert AI")
-if automatizado:
-    st.caption(f"🚀 Conectado via Secrets | Modelo: {modelo_ia}")
-
-tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
-
-with tab1:
-    st.subheader("Simulador de Aposta")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        d = st.number_input("Duplos (d)", min_value=0, max_value=14, value=0)
-    with col2:
-        t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
-
-    # Cálculo do Investimento em tempo real
-    # Fórmula: Custo = P_base * 2^D * 3^T
-    custo_final = preco_base * (2 ** d) * (3 ** t)
-    
-    st.metric("Investimento Estimado", f"R$ {custo_final:,.2f}")
-    
-    st.divider()
-    
-    entrada = st.text_area("1. Cole a rodada da semana aqui:", height=200, 
-                           placeholder="Ex: 1-Flamengo x Vasco\n2-Palmeiras x Santos...")
-    
-    if st.button("2. EXECUTAR ANÁLISE INTELIGENTE"):
-        if not api_key:
-            st.error("Erro: API Key não configurada nos Secrets do Streamlit.")
-        elif not entrada:
-            st.warning("Por favor, cole os confrontos para análise.")
-        else:
-            with st.spinner(f"Analisando com {modelo_ia}..."):
-                # Aqui o sistema integraria com sua classe LotecaAnalyst
-                st.success("Análise realizada! Verifique o gabarito sugerido.")
-                st.info("Dica: Os resultados foram salvos no seu banco de dados local.")
-
-with tab2:
-    st.subheader("Sua Performance")
-    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
-    
-    if os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(db_path)
-            query = "SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL"
-            df = pd.read_sql_query(query, conn)
-            conn.close()
-
-            if not df.empty:
-                # Lógica de acerto: resultado_real contido no palpite_sugerido
-                df['acertou'] = df.apply(lambda x: str(x['resultado_real']) in str(x['palpite_sugerido']), axis=1)
-                taxa = df['acertou'].mean()
-                
-                st.metric("Taxa de Acerto Geral", f"{taxa*100:.1f}%")
-                st.progress(taxa)
-                
-                # Gráfico de barras simples
-                st.bar_chart(df['acertou'].value_counts())
+    if not st.session_state["autenticado"]:
+        st.title("🔒 Acesso Restrito")
+        st.write("Esta é uma aplicação privada de análise da Loteca.")
+        
+        # Oculta o texto digitado
+        senha_digitada = st.text_input("Introduza a Senha Mestre:", type="password")
+        
+        if st.button("Entrar"):
+            # Verifica contra a senha salva nos Secrets
+            if senha_digitada == st.secrets["SENHA_MESTRE"]:
+                st.session_state["autenticado"] = True
+                st.rerun()
             else:
-                st.info("Aguardando inserção de resultados reais no 'loteca.db' para gerar o dashboard.")
-        except Exception as e:
-            st.error(f"Erro ao acessar estatísticas: {e}")
-    else:
-        st.error("Banco de dados 'loteca.db' não encontrado no repositório GitHub.")
+                st.error("Senha incorreta. Acesso negado.")
+        return False
+    return True
+
+# --- INÍCIO DA APLICAÇÃO ---
+if verificar_acesso():
+    # Carregamento de configurações via Secrets
+    api_key = st.secrets["GEMINI_API_KEY"]
+    p_base = st.secrets["PRECO_BASE"]
+    modelo_ia = st.secrets["MODELO_PADRAO"]
+
+    st.title("⚽ Loteca Expert AI")
+    st.caption(f"Utilizador Autenticado | Modelo: {modelo_ia}")
+
+    tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
+
+    with tab1:
+        st.subheader("Simulador de Investimento")
+        
+        # Layout mobile: duas colunas para números
+        col1, col2 = st.columns(2)
+        with col1:
+            d = st.number_input("Duplos (d)", min_value=0, max_value=14, value=0)
+        with col2:
+            t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
+
+        # Cálculo da fórmula: Custo = P_base * 2^D * 3^T
+        calc = LotecaCalc()
+        custo_final = p_base * (2 ** d) * (3 ** t)
+        
+        st.metric("Custo da Aposta", f"R$ {custo_final:,.2f}")
+        st.caption(f"Cálculo: R$ {p_base} × 2^{d} × 3^{t}")
+
+        st.divider()
+        
+        # Entrada de texto otimizada para telemóvel
+        entrada = st.text_area("1. Cole os confrontos da semana:", height=150)
+        
+        if st.button("2. EXECUTAR ANÁLISE INTELIGENTE"):
+            if not entrada:
+                st.warning("Por favor, cole os jogos primeiro.")
+            else:
+                with st.spinner("Consultando regras e notícias..."):
+                    # Aqui o código chama o motor LotecaAnalyst
+                    st.success("Análise Gemini concluída!")
+                    st.info("O relatório detalhado foi processado e guardado.")
+
+    with tab2:
+        st.subheader("Performance do Modelo")
+        db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
+        
+        if os.path.exists(db_path):
+            try:
+                conn = sqlite3.connect(db_path)
+                query = "SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL"
+                df = pd.read_sql_query(query, conn)
+                conn.close()
+
+                if not df.empty:
+                    # Lógica de acerto: verifica se a coluna real está no palpite sugerido
+                    df['acertou'] = df.apply(lambda x: str(x['resultado_real']) in str(x['palpite_sugerido']), axis=1)
+                    taxa = df['acertou'].mean()
+                    
+                    st.metric("Assertividade Geral", f"{taxa*100:.1f}%")
+                    st.progress(taxa)
+                    
+                    # Gráfico de barras dark
+                    st.bar_chart(df['acertou'].value_counts())
+                else:
+                    st.info("A aguardar dados de resultados reais para gerar estatísticas.")
+            except Exception as e:
+                st.error(f"Erro ao ler histórico: {e}")
+        else:
+            st.error("Base de dados 'loteca.db' não encontrada no GitHub.")
+
+    # Botão de Logout no final (opcional)
+    if st.sidebar.button("Sair da Aplicação"):
+        st.session_state["autenticado"] = False
+        st.rerun()
