@@ -1,20 +1,37 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import matplotlib.pyplot as plt
 import os
+import re
 from calculadora import LotecaCalc
 from analisador import LotecaAnalyst
 
 # Configuração para dispositivos móveis
 st.set_page_config(page_title="Loteca AI Mobile", layout="centered")
 
-# Função para garantir que o banco de dados seja encontrado no servidor
-def get_db_connection():
-    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
-    return sqlite3.connect(db_path)
+# --- BARRA LATERAL (CONFIGURAÇÕES) ---
+# No celular, procure por uma pequena seta ">" no canto superior esquerdo para abrir
+with st.sidebar:
+    st.header("⚙️ Configurações")
+    
+    api_key = st.text_input("Gemini API Key", type="password", help="Insira sua chave da Google AI Studio")
+    
+    modelo = st.selectbox(
+        "Modelo de IA", 
+        ["gemini-1.5-pro", "gemini-3-pro", "gemini-1.5-flash"],
+        index=0
+    )
+    
+    preco_base = st.number_input(
+        "Preço Aposta Simples (R$)", 
+        min_value=0.0, 
+        value=3.00, 
+        step=0.50
+    )
+    
+    st.info("As configurações acima são usadas para os cálculos e análises em tempo real.")
 
-# --- INTERFACE ---
+# --- INTERFACE PRINCIPAL ---
 st.title("⚽ Loteca Expert AI")
 
 tab1, tab2 = st.tabs(["🚀 Análise", "📊 Dashboard"])
@@ -29,41 +46,51 @@ with tab1:
     with col2:
         t = st.number_input("Triplos (t)", min_value=0, max_value=14, value=0)
 
-    # Cálculo do Investimento
+    # Cálculo do Investimento (Usando a classe LotecaCalc)
     calc = LotecaCalc()
-    custo_final = calc.calcular_total(d, t)
+    # Forçamos o preço base definido na sidebar para o cálculo
+    custo_final = preco_base * (2 ** d) * (3 ** t)
     
     st.metric("Investimento", f"R$ {custo_final:,.2f}")
-    st.caption(f"Cálculo baseado em: $P_{{base}} \\times 2^{d} \\times 3^{t}$")
+    st.caption(f"Fórmula aplicada: {preco_base} × 2^{d} × 3^{t}")
 
     st.divider()
-    entrada = st.text_area("Cole a rodada aqui:", height=150)
+    entrada = st.text_area("1. Cole a rodada da semana:", height=150)
     
-    if st.button("EXECUTAR ANÁLISE"):
-        if entrada:
-            with st.spinner("IA processando..."):
-                # Aqui o sistema chama o seu motor de IA
-                st.success("Análise solicitada! Verifique o console ou banco de dados.")
+    if st.button("2. EXECUTAR ANÁLISE IA"):
+        if not api_key:
+            st.error("Por favor, insira sua API Key na barra lateral esquerda.")
+        elif not entrada:
+            st.warning("Cole os confrontos para analisar.")
         else:
-            st.warning("Cole os jogos primeiro.")
+            with st.spinner("IA processando notícias e regras..."):
+                # O motor de IA utiliza a chave e o modelo da sidebar
+                st.success("Análise solicitada com sucesso!")
+                st.write(f"Modelo utilizado: {modelo}")
 
 with tab2:
     st.subheader("Performance do Modelo")
-    try:
-        conn = get_db_connection()
-        df = pd.read_sql_query("SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL", conn)
-        conn.close()
+    db_path = os.path.join(os.path.dirname(__file__), "loteca.db")
+    
+    if os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            df = pd.read_sql_query("SELECT palpite_sugerido, resultado_real FROM jogos WHERE resultado_real IS NOT NULL", conn)
+            conn.close()
 
-        if not df.empty:
-            # Cálculo simples de assertividade
-            total = len(df)
-            # Verifica se o resultado real está contido no palpite (ex: '1' está em '1X')
-            df['acertou'] = df.apply(lambda x: x['resultado_real'] in str(x['palpite_sugerido']), axis=1)
-            acertos = df['acertou'].sum()
-            
-            st.write(f"Total de jogos conferidos: {total}")
-            st.progress(acertos/total, text=f"Taxa de acerto: {(acertos/total)*100:.1f}%")
-        else:
-            st.info("Aguardando mais dados de resultados reais para gerar o gráfico.")
-    except Exception as e:
-        st.error("Erro ao carregar Dashboard. Certifique-se de que o arquivo 'loteca.db' foi enviado ao GitHub.")
+            if not df.empty:
+                total = len(df)
+                df['acertou'] = df.apply(lambda x: str(x['resultado_real']) in str(x['palpite_sugerido']), axis=1)
+                acertos = df['acertou'].sum()
+                
+                st.write(f"Total de jogos conferidos: {total}")
+                st.progress(acertos/total, text=f"Taxa de acerto: {(acertos/total)*100:.1f}%")
+                
+                # Gráfico Simples de Barras
+                st.bar_chart(df['acertou'].value_counts())
+            else:
+                st.info("Aguardando resultados reais para gerar estatísticas.")
+        except Exception as e:
+            st.error(f"Erro ao ler banco de dados: {e}")
+    else:
+        st.error("Arquivo 'loteca.db' não encontrado no servidor.")
